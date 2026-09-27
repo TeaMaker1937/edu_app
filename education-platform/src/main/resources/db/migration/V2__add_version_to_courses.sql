@@ -1,0 +1,2 @@
+ALTER TABLE courses
+    ADD COLUMN version BIGINT NOT NULL DEFAULT 0;

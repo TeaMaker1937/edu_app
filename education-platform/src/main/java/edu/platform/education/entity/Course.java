@@ -22,6 +22,10 @@ public class Course {
     @Column(columnDefinition = "TEXT")
     private String description;
 
+    @Version
+    @Column(nullable = false)
+    private Long version;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "teacher_id", nullable = false)
     private User teacher;

@@ -11,7 +11,7 @@ spring:
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: validate          # Flyway управляет схемой, Hibernate только проверяет
+      ddl-auto: validate
     show-sql: true
     properties:
       hibernate:
@@ -22,12 +22,32 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
 
+jwt:
+  secret: "4a607205a10960f4ae56101c89508643b3e640f4e0337e607c38c2c427a61973"
+  expiration: 86400000
+
 logging:
   level:
     root: INFO
     edu.platform: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+
+info:
+  app:
+    name: Education Platform
+    description: REST API образовательной платформы
+    version: 0.0.1-SNAPSHOT
+    java-version: 21
+    spring-boot-version: 4.1.1
+  author:
+    name: Максим
+    group: ИВТ44у
 
 management:
+  info:
+    env:
+      enabled: true
   endpoints:
     web:
       exposure:
