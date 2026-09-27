@@ -6,6 +6,7 @@ import edu.platform.education.exception.ResourceNotFoundException;
 import edu.platform.education.exception.UserAlreadyExistsException;
 import edu.platform.education.mapper.UserMapper;
 import edu.platform.education.repository.UserRepository;
+import edu.platform.education.service.notification.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -20,6 +21,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final NotificationService notificationService;
 
     @Transactional
     public User register(UserRegistrationRequest request) {
@@ -30,6 +32,7 @@ public class UserService {
         user.setPassword(passwordEncoder.encode(request.password()));
         User saved = userRepository.save(user);
         log.info("Зарегистрирован новый пользователь: {}", saved.getEmail());
+        notificationService.sendWelcomeEmail(saved);
         return saved;
     }
 
