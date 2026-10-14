@@ -37,13 +37,18 @@ services:
       DB_PASSWORD: postgres
       JWT_SECRET: "change-me-please-this-should-be-at-least-32-bytes-long-256-bit-key-for-hs256"
       JWT_EXPIRATION: 86400000
+      MEDIA_STORAGE_DIR: /app/storage/media
+      MEDIA_MAX_SIZE_BYTES: 5242880
     ports:
       - "8080:8080"
+    volumes:
+      - media-storage:/app/storage/media     # ← новое
     networks:
       - education-net
 
 volumes:
   postgres-data:
+  media-storage:                              # ← новое
 
 networks:
   education-net:

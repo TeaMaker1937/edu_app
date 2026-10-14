@@ -1,0 +1,40 @@
+groups:
+  - name: rscp-alerts
+    interval: 5s
+    rules:
+
+      # ---- 1. Enrollment: >20% ошибочных запросов за 5 минут ----
+      - alert: EnrollmentHighErrorRate
+        expr: |
+          (
+            sum(rate(enrollment_offers_total{result="error"}[5m]))
+            /
+            sum(rate(enrollment_offers_total[5m]))
+          ) > 0.20
+          and
+          sum(rate(enrollment_offers_total[5m])) > 0
+        for: 10s
+        labels:
+          severity: warning
+          service: enrollment
+        annotations:
+          summary: "Enrollment: более 20% запросов завершаются ошибкой"
+          description: "Доля ошибок = {{ $value | humanizePercentage }} за последние 5 минут"
+
+      # ---- 2. Platform notifications: тот же порог ----
+      - alert: NotificationHighErrorRate
+        expr: |
+          (
+            sum(rate(notification_sent_total{result="error"}[5m]))
+            /
+            sum(rate(notification_sent_total[5m]))
+          ) > 0.20
+          and
+          sum(rate(notification_sent_total[5m])) > 0
+        for: 10s
+        labels:
+          severity: warning
+          service: platform
+        annotations:
+          summary: "Platform: более 20% отправок уведомлений завершаются ошибкой"
+          description: "Доля ошибок = {{ $value | humanizePercentage }} за последние 5 минут"
