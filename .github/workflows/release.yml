@@ -1,0 +1,227 @@
+name: Release
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: '21'
+  BASE_VERSION: '1.0'
+  SPRING_BOOT_VERSION: '3.3.4'
+
+jobs:
+  # ---------- П.7 + П.10: build + test, при падении релиза не будет ----------
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Install platform-lib (dependency)
+        run: mvn -B -ntp -f platform-lib/pom.xml install
+
+      # П.7: тесты, включая тест варианта (EnrollmentConfirmedDedupTest)
+      # Если падает ЛЮБОЙ обязательный тест — job test падает,
+      # release не запускается (см. needs: test)
+      - name: Run all tests
+        run: |
+          set -e
+          for svc in catalog-service enrollment-service payment-service gateway-service education-platform; do
+            echo "=== Testing $svc ==="
+            mvn -B -ntp -f $svc/pom.xml test
+          done
+
+      - name: Package JARs
+        run: |
+          set -e
+          for svc in catalog-service enrollment-service payment-service gateway-service education-platform; do
+            echo "=== Packaging $svc ==="
+            mvn -B -ntp -f $svc/pom.xml package -DskipTests
+          done
+
+      - name: Upload test reports (always — чтобы видеть, что упало)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            */target/surefire-reports/*.txt
+            */target/surefire-reports/*.xml
+
+      - name: Upload JARs
+        uses: actions/upload-artifact@v4
+        with:
+          name: jars
+          path: '*/target/*.jar'
+          if-no-files-found: error
+
+  # ---------- П.6, П.8, П.9: релиз только после зелёных тестов ----------
+  release:
+    name: Release ${{ github.run_number }}
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download JARs
+        uses: actions/download-artifact@v4
+        with:
+          name: jars
+          path: artifacts
+
+      - name: Compute version, SHA-256, prepare release dir
+        id: meta
+        run: |
+          set -e
+          VERSION="${{ env.BASE_VERSION }}.${{ github.run_number }}"
+          COMMIT_SHA=$(git rev-parse HEAD)
+          COMMIT_SHORT=$(git rev-parse --short HEAD)
+          RUN_NUMBER="${{ github.run_number }}"
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          echo "version=$VERSION"         >> $GITHUB_OUTPUT
+          echo "commit_sha=$COMMIT_SHA"  >> $GITHUB_OUTPUT
+          echo "commit_short=$COMMIT_SHORT" >> $GITHUB_OUTPUT
+          echo "run_number=$RUN_NUMBER"  >> $GITHUB_OUTPUT
+          echo "now=$NOW"                >> $GITHUB_OUTPUT
+
+          mkdir -p release
+          find artifacts -name '*.jar' -not -name '*.original' -exec cp {} release/ \;
+
+          echo "=== JARs downloaded ==="
+          ls -lh release/
+
+      - name: Generate release passport (п.8)
+        run: |
+          set -e
+          PASSPORT=release/RELEASE-PASSPORT.md
+
+          cat > $PASSPORT <<EOF
+          # Release Passport — v${{ steps.meta.outputs.version }}
+
+          | Поле | Значение |
+          |---|---|
+          | **Версия** | \`${{ steps.meta.outputs.version }}\` |
+          | **Commit SHA** | \`${{ steps.meta.outputs.commit_sha }}\` |
+          | **Short commit** | \`${{ steps.meta.outputs.commit_short }}\` |
+          | **Run number** | ${{ steps.meta.outputs.run_number }} |
+          | **Java** | ${{ env.JAVA_VERSION }} (Temurin) |
+          | **Spring Boot** | ${{ env.SPRING_BOOT_VERSION }} |
+          | **Build time (UTC)** | ${{ steps.meta.outputs.now }} |
+          | **Ветка** | ${{ github.ref_name }} |
+          | **Trigger** | ${{ github.event_name }} by ${{ github.actor }} |
+
+          ## JAR-артефакты и контрольные суммы SHA-256
+
+          | Сервис | JAR | SHA-256 |
+          |---|---|---|
+          EOF
+
+          for f in release/*.jar; do
+            name=$(basename "$f")
+            sha=$(sha256sum "$f" | awk '{print $1}')
+            svc=$(echo "$name" | sed 's/-[0-9].*$//')
+            echo "| $svc | $name | \`$sha\` |" >> $PASSPORT
+          done
+
+          cat >> $PASSPORT <<EOF
+
+          ## Поддерживаемые API
+
+          | Сервис                 | Версия               | Эндпоинты                                                                                                             |
+          |------------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------|
+          | **enrollment-service** | \`API-Version: 1.0\` | \`GET /api/enrollments/{id}\` — базовые поля                                                                          |
+          | **enrollment-service** | \`API-Version: 2.0\` | \`GET /api/enrollments/{id}\` — + offer, notificationTemplate, notificationAvailable                                  |
+          | enrollment-service     | —                    | \`POST /api/enrollments\`, \`POST /api/enrollments/paid\`, \`GET /api/saga/{id}\`, \`GET /api/saga/{id}/transitions\` |
+          | education-platform     | стабильный           | \`/api/auth/**\`, \`/api/users/me\`, \`/api/courses/**\`, \`/api/notifications/**\`                                   |
+          | catalog-service        | —                    | \`GET /api/courses/{id}/offer\`, \`GET /api/courses/{id}/notification-template\`                                      |
+          | payment-service        | —                    | \`GET /api/payment/mode\`, \`POST /api/payment/mode/{mode}\`                                                          |
+          | gateway-service        | —                    | \`/api/**\` (маршрутизация + JWT)                                                                                     |
+
+          ## Требования к схеме БД
+
+          - **СУБД:** PostgreSQL ≥ 16 (проверено на 18.6)
+          - **Миграции:** Flyway, применяются автоматически при старте
+          - **enrollment** (schema \`enrollment\`): V1..V6
+            - \`enrollments\`, \`idempotency_keys\`, \`outbox_events\`, \`saga_instances\`, \`saga_transitions\`
+          - **catalog** (schema \`catalog\`): V1
+            - \`seat_operations\` + колонка \`courses.reserved_seats\` (V14 в education-platform)
+          - **payment** (schema \`payment\`): V1
+            - \`payments\`
+          - **education-platform** (schema \`public\`): V1..V14
+            - \`users\`, \`courses\`, \`lessons\`, \`media_files\`, \`notifications\`, \`inbox_events\`
+
+          ## Как развернуть
+
+          \`\`\`bash
+          # Скачать из этого релиза нужный JAR:
+          # education-platform-0.0.1-SNAPSHOT.jar — основной сервис
+          # enrollment-service-1.0.0.jar        — координатор Saga
+          # catalog-service-1.0.0.jar           — курсы и резервирование
+          # payment-service-1.0.0.jar           — учебный платёжный шлюз
+          # gateway-service-1.0.0.jar           — единая точка входа
+
+          java -jar education-platform-0.0.1-SNAPSHOT.jar
+          # Подключение к БД и адреса сервисов — через переменные окружения:
+          # DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+          # JWT_SECRET, JWT_ISSUER, JWT_AUDIENCE
+          # SPRING_R2DBC_URL, CATALOG_BASE_URL, RABBITMQ_HOST
+          \`\`\`
+
+          ## Проверка целостности
+
+          \`\`\`bash
+          sha256sum education-platform-0.0.1-SNAPSHOT.jar
+          # Сверьте с колонкой SHA-256 выше — должны совпадать.
+          \`\`\`
+          EOF
+
+          echo "=== Passport generated ==="
+          cat $PASSPORT
+
+      - name: Verify SHA-256 round-trip (self-check)
+        run: |
+          set -e
+          for f in release/*.jar; do
+            name=$(basename "$f")
+            sha_file=$(sha256sum "$f" | awk '{print $1}')
+            sha_passport=$(grep -F "| $name |" release/RELEASE-PASSPORT.md | awk -F'|' '{gsub(/[\` ]/,"",$4); print $4}')
+            if [ "$sha_file" = "$sha_passport" ]; then
+              echo "✅ $name : $sha_file"
+            else
+              echo "❌ MISMATCH for $name: file=$sha_file passport=$sha_passport"
+              exit 1
+            fi
+          done
+
+      - name: Upload artifacts (always for debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: release/
+
+      - name: Create GitHub Release (п.9 — только после зелёных тестов)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}
+          name: Release v${{ steps.meta.outputs.version }} (build #${{ steps.meta.outputs.run_number }})
+          body_path: release/RELEASE-PASSPORT.md
+          files: |
+            release/*.jar
+            release/RELEASE-PASSPORT.md
+          fail_on_unmatched_files: true
