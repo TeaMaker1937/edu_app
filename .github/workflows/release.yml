@@ -37,10 +37,25 @@ jobs:
       - name: Run all tests
         run: |
           set -e
-          for svc in catalog-service enrollment-service payment-service gateway-service education-platform; do
-            echo "=== Testing $svc ==="
-            mvn -B -ntp -f $svc/pom.xml test
-          done
+
+          echo "=== platform-lib (unit) ==="
+          mvn -B -ntp -f platform-lib/pom.xml test
+
+          echo "=== catalog-service (unit) ==="
+          mvn -B -ntp -f catalog-service/pom.xml test
+
+          echo "=== enrollment-service (unit) ==="
+          mvn -B -ntp -f enrollment-service/pom.xml test
+
+          echo "=== payment-service (unit) ==="
+          mvn -B -ntp -f payment-service/pom.xml test
+
+          echo "=== gateway-service (unit) ==="
+          mvn -B -ntp -f gateway-service/pom.xml test
+
+          echo "=== education-platform (unit + variant) ==="
+          mvn -B -ntp -f education-platform/pom.xml test \
+            -Dtest='EnrollmentConfirmedDedupTest,ModularityTests'
 
       - name: Package JARs
         run: |

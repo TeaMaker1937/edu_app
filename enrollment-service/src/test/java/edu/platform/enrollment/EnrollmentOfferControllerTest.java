@@ -22,6 +22,9 @@ class EnrollmentOfferControllerTest {
     @MockBean
     private CatalogClient catalogClient;
 
+    @MockBean
+    private OfferMetrics offerMetrics;
+
     @Test
     void whenCatalogReturnsOffer_then200() {
         when(catalogClient.fetchOffer(1L, "1.0"))
