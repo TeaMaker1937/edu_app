@@ -13,19 +13,19 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
  * Защищает вариант 4 (уведомления) от регрессии:
- *  - при первом событии — создаётся ровно одна notification
- *  - при повторной доставке того же eventId — notification НЕ создаётся
- *  - метрика notification_dedup_skips_total инкрементируется только на дубле
+ *  - при первом событии — создаётся ровно одна notification, метрика SKIP не растёт
+ *  - при повторной доставке того же eventId — notification НЕ создаётся, метрика SKIP растёт
  *
  * Если кто-то снова сделает HANDLER_ID уникальным при каждом запуске
- * (System.currentTimeMillis) — tryInsert будет вызван с другим handlerId,
- * мок вернёт 0 → второй тест упадёт → CI остановит релиз (п.10).
+ * (System.currentTimeMillis) — tryInsert вернёт 1 (мок default? нет — test
+ * на это не сработает, но второй тест тогда упадёт по missing verify counter.increment()).
  */
 @ExtendWith(MockitoExtension.class)
 class EnrollmentConfirmedDedupTest {
@@ -45,19 +45,19 @@ class EnrollmentConfirmedDedupTest {
     }
 
     @Test
-    void whenEventFirstTime_thenNotificationCreated_andNoSkipMetric() throws Exception {
+    void whenEventFirstTime_thenNotificationCreated() throws Exception {
         EnrollmentConfirmedEvent event = new EnrollmentConfirmedEvent(
                 "evt-1", 42L, 1L, 2L, "C# Course", LocalDateTime.now());
 
         when(objectMapper.writeValueAsString(event)).thenReturn("{}");
         when(inboxRepository.tryInsert(eq("evt-1"), eq("notification"), anyString()))
                 .thenReturn(1);
-        when(meterRegistry.counter(anyString(), anyString(), anyString())).thenReturn(counter);
 
         listener.onConfirmed(event);
 
         verify(notificationService).notifyEnrollment(2L, 1L, "C# Course");
-        verify(counter, never()).increment();
+        // При первом событии listener НЕ должен даже пытаться взять counter
+        verify(meterRegistry, never()).counter(anyString(), anyString(), anyString());
     }
 
     @Test
