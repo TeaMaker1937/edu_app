@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import io.micrometer.core.instrument.MeterRegistry;
 
 @Slf4j
 @Component
@@ -19,6 +20,7 @@ public class EnrollmentConfirmedListener {
     private final NotificationService notificationService;
     private final InboxRepository inboxRepository;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry metrics;
 
     @RabbitListener(queues = RabbitConfig.CONFIRMED_QUEUE)
     @Transactional
@@ -39,9 +41,10 @@ public class EnrollmentConfirmedListener {
         if (inserted == 0) {
             log.warn("[CONFIRMED-CONSUMER] Дубликат eventId={}, handler={} — SKIP",
                     event.eventId(), HANDLER_ID);
+            metrics.counter("notification_dedup_skips_total",
+                    "handler", HANDLER_ID).increment();
             return;
         }
-
         notificationService.notifyEnrollment(
                 event.userId(), event.courseId(), event.courseTitle());
 

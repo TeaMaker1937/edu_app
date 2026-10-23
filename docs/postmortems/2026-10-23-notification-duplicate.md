@@ -105,14 +105,29 @@ Postmortem без BLAMELESS. Сбой — свойство системы, не 
 ```markdown
 # Таблица исправлений (постмортем 2026-10-23)
 
-| # | Действие | Роль | Срок | Признак успешного завершения |
-|---|---|---|---|---|
-| 1 | Зафиксировать `HANDLER_ID = "notification"` как константу, убрать `System.currentTimeMillis()` | Backend | 1 день | В коде единственное значение; эксперимент с kill не создаёт дубликат |
-| 2 | Добавить метрику `notification_dedup_skips_total` (counter, tag handler) | Backend | 3 дня | `curl /actuator/prometheus` содержит `notification_dedup_skips_total` |
-| 3 | Алерт Prometheus: `rate(notification_dedup_skips_total[5m]) > 0` | DevOps | 3 дня | Prometheus → Alerts → Firing при симуляции дубля |
-| 4 | Ранбук «дубликаты notification» в `docs/runbooks/` | Tech Writer | 5 дней | Runbook существует, содержит SQL-дедупликатор |
-| 5 | Cleanup-скрипт для `inbox_events` > 30 дней | Backend | 7 дней | Cron-задача в docker-compose, логи «cleanup inbox: N rows deleted» |
-| 6 | Тест `EnrollmentConfirmedDedupTest` (интеграционный) | QA | 5 дней | Тест в `education-platform/src/test`, зелёный в CI |
-| 7 | Weekly-джоб проверки: `SELECT event_id, COUNT(*) FROM inbox_events GROUP BY event_id, handler_id HAVING COUNT(*) > 1` | DevOps | 10 дней | Cronjob, пустой результат на продакшене |
-
+| # | Действие                                                                                                              | Роль        | Срок    | Признак успешного завершения                                          |
+|---|-----------------------------------------------------------------------------------------------------------------------|-------------|---------|-----------------------------------------------------------------------|
+| 1 | Зафиксировать `HANDLER_ID = "notification"` как константу, убрать `System.currentTimeMillis()`                        | Backend     | 1 день  | В коде единственное значение; эксперимент с kill не создаёт дубликат  |
+| 2 | Добавить метрику `notification_dedup_skips_total` (counter, tag handler)                                              | Backend     | 3 дня   | `curl /actuator/prometheus` содержит `notification_dedup_skips_total` |
+| 3 | Алерт Prometheus: `rate(notification_dedup_skips_total[5m]) > 0`                                                      | DevOps      | 3 дня   | Prometheus → Alerts → Firing при симуляции дубля                      |
+| 4 | Ранбук «дубликаты notification» в `docs/runbooks/`                                                                    | Tech Writer | 5 дней  | Runbook существует, содержит SQL-дедупликатор                         |
+| 5 | Cleanup-скрипт для `inbox_events` > 30 дней                                                                           | Backend     | 7 дней  | Cron-задача в docker-compose, логи «cleanup inbox: N rows deleted»    |
+| 6 | Тест `EnrollmentConfirmedDedupTest` (интеграционный)                                                                  | QA          | 5 дней  | Тест в `education-platform/src/test`, зелёный в CI                    |
+| 7 | Weekly-джоб проверки: `SELECT event_id, COUNT(*) FROM inbox_events GROUP BY event_id, handler_id HAVING COUNT(*) > 1` | DevOps      | 10 дней | Cronjob, пустой результат на продакшене                               |
+```
 **Обязательное к выпуску:** #1 и #6.
+
+## Таблица «Вывод → Подтверждение → Статус»
+```markdown
+| # | Вывод                                                            | Подтверждение                                                                     | Статус                                                                |
+|---|------------------------------------------------------------------|-----------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| 1 | Дубликат создаётся при повторной доставке без inbox              | `SELECT COUNT(*) FROM notifications = 2` после kill+restart, eventId=918555c6-... | ✅ подтверждено                                                       |
+| 2 | eventId не меняется при повторной публикации                     | Логи `[CONFIRMED-CONSUMER] Получено: eventId=918555c6-...` дважды                 | ✅ подтверждено                                                       |
+| 3 | inbox не помогает при уникальном handlerId                       | `SELECT event_id, handler_id` — 2 строки, один eventId, разные handlerId          | ✅ подтверждено                                                       |
+| 4 | inbox дедуплицирует при стабильном handlerId                     | `Дубликат eventId=fec94bce-..., handler=notification — SKIP`, count=1             | ✅ подтверждено                                                       |
+| 5 | Kill до ACK не откатывает эффект (INSERT notifications уже в БД) | Между `INSERT notifications` и `kill` прошло ~3мс, в БД строка есть               | ✅ подтверждено                                                       |
+| 6 | Проблема встречается 1-3 раза в сутки на реальной нагрузке       | **оценка**                                                                        | ❓ НЕ ПОДТВЕРЖДЕНО (нет метрики `redelivery_count`)                   |
+| 7 | HANDLER_ID в проде кто-то меняет вручную                         | **предположение**                                                                 | ❓ НЕ ПОДТВЕРЖДЕНО (нет аудита git-history по этой строке)            |
+| 8 | Реальные email/пуш пользователю приходят дважды                  | модель имитационная                                                               | ❓ НЕ ПОДТВЕРЖДЕНО (в лабе 5 integration mock, реальной отправки нет) |
+```
+
