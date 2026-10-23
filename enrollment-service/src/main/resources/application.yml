@@ -1,0 +1,99 @@
+server:
+  port: ${SERVER_PORT:8082}
+  shutdown: graceful
+
+spring:
+  application:
+    name: enrollment-service
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+  r2dbc:
+    url: ${SPRING_R2DBC_URL:r2dbc:postgresql://localhost:5432/education_platform}
+    username: ${SPRING_R2DBC_USERNAME:postgres}
+    password: ${SPRING_R2DBC_PASSWORD:postgres}
+
+  flyway:
+    enabled: true
+    url: ${SPRING_R2DBC_URL_JDBC:jdbc:postgresql://localhost:5432/education_platform}
+    user: ${SPRING_R2DBC_USERNAME:postgres}
+    password: ${SPRING_R2DBC_PASSWORD:postgres}
+    schemas: enrollment
+    default-schema: enrollment
+    create-schemas: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated   # брокер шлёт ack/nack на каждое сообщение
+    publisher-returns: true              # возврат при unroutable (mandatory)
+    template:
+      mandatory: true                    # каждое сообщение маркируется mandatory
+
+outbox:
+  relay:
+    enabled: ${OUTBOX_RELAY_ENABLED:true}
+    interval-ms: 2000
+
+catalog:
+  base-url: ${CATALOG_BASE_URL:http://localhost:8081}
+  timeout: ${CATALOG_TIMEOUT:200ms}
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"
+  level:
+    root: INFO
+    edu.platform: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,env,circuitbreakers,circuitbreakerevents,bulkheads
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    show-details: always
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: http://localhost:9411/api/v2/spans
+
+jwt:
+  secret: ${JWT_SECRET:1BF2o9BMGU4Cp9sUUq0EYiBj8CltPwZcfRmrNvG7HJx}
+  issuer: ${JWT_ISSUER:edu-platform}
+  audience: ${JWT_AUDIENCE:education-platform}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      catalog:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10              # смотрим на 10 последних вызовов
+        minimum-number-of-calls: 5           # не открываемся, пока <5 вызовов
+        failure-rate-threshold: 50           # открываемся при ≥50% ошибок
+        wait-duration-in-open-state: 10s     # через 10с → HALF_OPEN
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+
+  bulkhead:
+    instances:
+      catalog:
+        max-concurrent-calls: 5              # не более 5 одновременных запросов к catalog
+        max-wait-duration: 0ms               # при превышении — сразу отказ, без ожидания

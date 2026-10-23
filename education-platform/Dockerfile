@@ -2,11 +2,10 @@ FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /app
 
-# Непривилегированный пользователь
 RUN addgroup -S spring && adduser -S spring -G spring
+RUN mkdir -p /app/storage/media && chown -R spring:spring /app/storage
 USER spring:spring
 
-# Копируем уже собранный jar
 COPY target/*.jar app.jar
 
 EXPOSE 8080

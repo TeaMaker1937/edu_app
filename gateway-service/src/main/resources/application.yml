@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: gateway-service
+
+  cloud:
+    gateway:
+      routes:
+        - id: enrollment
+          uri: http://enrollment:8082
+          predicates:
+            - Path=/api/enrollments/**,/api/enrollment-offers/**,/api/saga/**
+          order: 1
+
+        - id: catalog-meta
+          uri: http://catalog:8081
+          predicates:
+            - Path=/api/courses/{id}/offer,/api/courses/{id}/notification-template
+          order: 2
+
+        - id: payment
+          uri: http://payment:8083
+          predicates:
+            - Path=/api/payment/**,/api/payments/**
+          order: 3
+
+        - id: platform
+          uri: http://platform:8080
+          predicates:
+            - Path=/api/**
+          order: 100
+
+      httpclient:
+        connect-timeout: 2000
+        response-timeout: 5s
+
+server:
+  port: 8085
+
+jwt:
+  secret: ${JWT_SECRET:1BF2o9BMGU4Cp9sUUq0EYiBj8CltPwZcfRmrNvG7HJx}
+  issuer: ${JWT_ISSUER:edu-platform}
+  audience: ${JWT_AUDIENCE:education-platform}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    edu.platform.gateway: DEBUG

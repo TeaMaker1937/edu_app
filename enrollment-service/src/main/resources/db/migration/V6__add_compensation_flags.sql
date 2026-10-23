@@ -1,0 +1,3 @@
+ALTER TABLE enrollment.saga_instances
+    ADD COLUMN release_done BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN refund_done  BOOLEAN NOT NULL DEFAULT FALSE;

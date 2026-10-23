@@ -105,7 +105,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"title\": \"Java Spring Boot\",\n  \"description\": \"Базовый курс по Spring Boot для начинающих\"\n}"
+          "raw": "{\n  \"title\": \"Java Spring Boot\",\n  \"description\": \"Базовый курс по Spring Boot для начинающих\",\n  \"price\"\: 5000.00}"
         },
         "url": { "raw": "{{baseUrl}}/api/courses", "host": ["{{baseUrl}}"], "path": ["api","courses"] }
       }

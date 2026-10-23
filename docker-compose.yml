@@ -1,0 +1,262 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: education-postgres
+    restart: unless-stopped
+    stop_grace_period: 45s
+    environment:
+      POSTGRES_DB: education_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d education_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - education-net
+
+  zipkin:
+    image: openzipkin/zipkin:3
+    container_name: zipkin
+    restart: unless-stopped
+    ports:
+      - "9411:9411"
+    networks:
+      - education-net
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - education-net
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    networks:
+      - education-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "25672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      # Исправлен синтаксис локали (убраны лишние пробелы и двоеточия)
+      LANG: "C.UTF-8"
+      LC_ALL: "C.UTF-8"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - education-net
+
+  platform:
+    build:
+      context: ./education-platform
+      dockerfile: Dockerfile
+    container_name: education-platform
+    restart: unless-stopped
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      # Добавлен принудительный UTF-8 для JVM
+      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -Duser.language=ru -Duser.region=RU"
+      SPRING_PROFILES_ACTIVE: docker
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: education_platform
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: "1BF2o9BMGU4Cp9sUUq0EYiBj8CltPwZcfRmrNvG7HJx"
+      JWT_EXPIRATION: 86400000
+      JWT_ISSUER: "edu-platform"
+      JWT_AUDIENCE: "education-platform"
+      MEDIA_STORAGE_DIR: /app/storage/media
+      MEDIA_MAX_SIZE_BYTES: 5242880
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      PAUSE_AFTER_SAVE: "false"
+      PAUSE_AFTER_COMMIT: "false"
+
+    ports:
+      - "8080:8080"
+    volumes:
+      - media-storage:/app/storage/media
+    networks:
+      - education-net
+
+  catalog:
+    build:
+      context: ./catalog-service
+      dockerfile: Dockerfile
+    container_name: catalog-service
+    restart: unless-stopped
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
+    environment:
+      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+      SPRING_R2DBC_URL: r2dbc:postgresql://postgres:5432/education_platform
+      SPRING_R2DBC_USERNAME: postgres
+      SPRING_R2DBC_PASSWORD: postgres
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/education_platform
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      MANAGEMENT_TRACING_ENABLED: "true"
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      JWT_SECRET: "1BF2o9BMGU4Cp9sUUq0EYiBj8CltPwZcfRmrNvG7HJx"
+      JWT_ISSUER: "edu-platform"
+      JWT_AUDIENCE: "education-platform"
+    ports:
+      - "8081:8081"
+    networks:
+      - education-net
+
+  enrollment:
+    build:
+      context: ./enrollment-service
+      dockerfile: Dockerfile
+    container_name: enrollment-service
+    restart: unless-stopped
+    stop_grace_period: 45s
+    depends_on:
+      zipkin:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      catalog:
+        condition: service_started
+    environment:
+      # Добавлен принудительный UTF-8 для JVM
+      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+      CATALOG_BASE_URL: http://catalog:8081
+      SPRING_R2DBC_URL: r2dbc:postgresql://postgres:5432/education_platform
+      SPRING_R2DBC_URL_JDBC: jdbc:postgresql://postgres:5432/education_platform
+      SPRING_R2DBC_USERNAME: postgres
+      SPRING_R2DBC_PASSWORD: postgres
+      MANAGEMENT_TRACING_ENABLED: "true"
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      RELAY_PAUSE_AFTER_CONFIRM: "false"
+      JWT_SECRET: "1BF2o9BMGU4Cp9sUUq0EYiBj8CltPwZcfRmrNvG7HJx"
+      JWT_ISSUER: "edu-platform"
+      JWT_AUDIENCE: "education-platform"
+    ports:
+      - "8082:8082"
+    networks:
+      - education-net
+
+  payment:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    container_name: payment-service
+    restart: unless-stopped
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/education_platform
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      PAYMENT_REFUND_ENABLED: "true"
+      JWT_SECRET: "1BF2o9BMGU4Cp9sUUq0EYiBj8CltPwZcfRmrNvG7HJx"
+      JWT_ISSUER: "edu-platform"
+      JWT_AUDIENCE: "education-platform"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q -O- http://localhost:8083/actuator/health || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "8083:8083"
+    networks:
+      - education-net
+
+  gateway:
+    build:
+      context: ./gateway-service
+      dockerfile: Dockerfile
+    container_name: gateway-service
+    restart: unless-stopped
+    depends_on:
+      - platform
+      - catalog
+      - enrollment
+      - payment
+    environment:
+      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8"
+      JWT_SECRET: "1BF2o9BMGU4Cp9sUUq0EYiBj8CltPwZcfRmrNvG7HJx"
+      JWT_ISSUER: "edu-platform"
+      JWT_AUDIENCE: "education-platform"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8085/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "8085:8085"
+    networks:
+      - education-net
+
+volumes:
+  postgres-data:
+  media-storage:
+  rabbitmq-data:
+
+networks:
+  education-net:
+    driver: bridge

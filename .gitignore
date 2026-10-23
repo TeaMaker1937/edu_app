@@ -1,0 +1,40 @@
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+
+# Gradle
+.gradle/
+build/
+gradle-app.setting
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+
+# Build artifacts
+education-platform/storage/
+education-platform/*.tar
+
+# Local artifacts from broken shell commands (see git status)
+-H
+-Method
+-c
+exchange=*
+body.json
+bad.json
+good.json
+all_sources.java
+combined.java
+prom.txt
+rebuild-all.ps1
+
+# Runtime data
+*.log
+*.tmp
