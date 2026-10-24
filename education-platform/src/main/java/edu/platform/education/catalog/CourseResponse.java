@@ -7,5 +7,6 @@ public record CourseResponse(
         String title,
         String summary,
         BigDecimal price,
-        Long teacherId
+        Long teacherId,
+        String level   // ← V15
 ) {}

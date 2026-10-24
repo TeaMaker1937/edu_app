@@ -7,11 +7,7 @@ import java.math.BigDecimal;
 
 @Entity
 @Table(name = "courses")
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
+@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Course {
 
     @Id
@@ -34,4 +30,15 @@ public class Course {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "teacher_id", nullable = false)
     private User teacher;
+
+    // === V15: новое поле ===
+    @Column(nullable = false, length = 32)
+    private String level;
+
+    @PrePersist
+    void ensureLevel() {
+        if (level == null || level.isBlank()) {
+            level = "BASIC";
+        }
+    }
 }
